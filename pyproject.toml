@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airfoil-fit-core"
+version = "0.1.0"
+description = "Headless B-spline fitting for airfoil coordinate data"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy"]
+license = {text = "MIT"}
+readme = "README.md"
+authors = [{name = "Michael Reeg"}]
+
+[tool.setuptools.packages.find]
+where = ["src"]
