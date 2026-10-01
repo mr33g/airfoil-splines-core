@@ -1,13 +1,14 @@
+from pathlib import Path
 import numpy as np
 
-from airfoil_fit_core import config
-from airfoil_fit_core.data_loader import load_airfoil_data
+from airfoil_fit import config
+from airfoil_fit.data_loader import parse_airfoil_data
 
 
 class AirfoilProcessor:
     """
-    Acts as a bridge between the Fusion plugin and the core logic.
-    Modified for Fusion to remove Qt dependencies.
+    Load normalized airfoil surfaces, reference data, and endpoint tangents.
+    This model has no application or UI dependencies.
     """
 
     def __init__(self, logger_func=print):
@@ -25,6 +26,10 @@ class AirfoilProcessor:
 
 
     def load_airfoil_data_and_initialize_model(self, file_path):
+        """File convenience wrapper around the in-memory loader."""
+        return self.load_text(Path(file_path).read_text())
+
+    def load_text(self, text):
         """
         Loads airfoil data and initializes the model.
         Resets internal flags and state.
@@ -39,10 +44,10 @@ class AirfoilProcessor:
         self._te_thickness = 0.0
 
         try:
-            upper, lower, airfoil_name, blunt_te, te_thickness = load_airfoil_data(file_path, logger_func=self.logger_func)
+            upper, lower, airfoil_name, blunt_te, te_thickness = parse_airfoil_data(text, logger_func=self.logger_func)
             self.upper_data = upper
             self.lower_data = lower
-            self._load_display_reference_data(file_path, upper, lower)
+            self._load_display_reference_data(text, upper, lower)
             self.airfoil_name = airfoil_name
             self._is_blunt_TE = blunt_te
             self._te_thickness = te_thickness
@@ -56,11 +61,11 @@ class AirfoilProcessor:
             self.logger_func(f"Failed to load or initialize airfoil data: {e}")
             return False
 
-    def _load_display_reference_data(self, file_path, fallback_upper, fallback_lower) -> None:
+    def _load_display_reference_data(self, text, fallback_upper, fallback_lower) -> None:
         """Keep normalized non-repaneled input for display and final error reporting."""
         try:
-            upper_ref, lower_ref, _name, _blunt_te, _te_thickness = load_airfoil_data(
-                file_path,
+            upper_ref, lower_ref, _name, _blunt_te, _te_thickness = parse_airfoil_data(
+                text,
                 logger_func=lambda _msg: None,
                 repanel_input=False,
             )

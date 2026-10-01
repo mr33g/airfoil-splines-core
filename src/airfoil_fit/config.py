@@ -3,15 +3,12 @@
 This module gathers default numeric parameters and tunable hyper-parameters
 used across the airfoil processing library so they live in one place.
 Import these values instead of hard-coding magic numbers inside
-algorithms or UI widgets.
+numerical algorithms. Application defaults live in the consumers.
 """
 from __future__ import annotations
 
 # B-spline settings
-DEFAULT_SMOOTHNESS_PENALTY: float = 0.001  # Weight for control point smoothing penalty (higher = smoother, lower = more accurate)
-DEFAULT_CP_COUNT: int = 10
 MIN_CP_NEIGHBOR_DISTANCE: float = 1.0e-3
-FIT_ERROR_OBJECTIVE: str = "vertical"
 
 # ---- Sampling & Debugging -----------------------------------------------
 NUM_POINTS_CURVE_ERROR: int = 35000

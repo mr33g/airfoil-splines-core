@@ -1,26 +1,22 @@
 from __future__ import annotations
 
 import numpy as np
+from copy import deepcopy
 
-from airfoil_fit_core import config
-from airfoil_fit_core.optimization import pure_surface_fit_error
-from airfoil_fit_core import bspline_helper
+from airfoil_fit.optimization import pure_surface_fit_error
+from airfoil_fit import bspline_helper
 
 
 def apply_knot_insertions(proc, new_knots: list[float], surface: str | None = None) -> bool | None:
     """Apply knot insertion without refitting/finalizing.
 
     Returns:
-        bool: True when single-span degree changed, False otherwise.
-        None: insertion failed.
+        True on success; None on failure. The degree never changes.
     """
     if not new_knots:
         return False
 
     sorted_new_knots = sorted(new_knots)
-    was_single_span_upper = (proc.degree_upper == proc.num_cp_upper - 1) if proc.num_cp_upper > 0 else False
-    was_single_span_lower = (proc.degree_lower == proc.num_cp_lower - 1) if proc.num_cp_lower > 0 else False
-    degree_changed = False
     insertion_records: list[dict[str, float | bool | str]] = []
 
     if surface is None or surface == "upper":
@@ -47,9 +43,6 @@ def apply_knot_insertions(proc, new_knots: list[float], surface: str | None = No
         proc.upper_control_points = current_upper_cps
         proc.upper_knot_vector = current_upper_knots
         proc.num_cp_upper = len(proc.upper_control_points)
-        if was_single_span_upper:
-            proc.degree_upper = proc.num_cp_upper - 1
-            degree_changed = True
 
     if surface is None or surface == "lower":
         if proc.lower_control_points is None or proc.lower_knot_vector is None:
@@ -75,12 +68,9 @@ def apply_knot_insertions(proc, new_knots: list[float], surface: str | None = No
         proc.lower_control_points = current_lower_cps
         proc.lower_knot_vector = current_lower_knots
         proc.num_cp_lower = len(proc.lower_control_points)
-        if was_single_span_lower:
-            proc.degree_lower = proc.num_cp_lower - 1
-            degree_changed = True
 
     proc.last_insertion_info = {"records": insertion_records}
-    return degree_changed
+    return True
 
 
 def insert_knot_with_spacing_fallback(
@@ -163,10 +153,6 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
     if proc.upper_original_data is None or proc.lower_original_data is None:
         return True
 
-    metric = str(getattr(config, "FIT_ERROR_OBJECTIVE", "vertical")).strip().lower()
-    if metric != "vertical":
-        metric = "vertical"
-
     baseline_upper_cp = None if proc.upper_control_points is None else np.asarray(proc.upper_control_points, dtype=float).copy()
     baseline_lower_cp = None if proc.lower_control_points is None else np.asarray(proc.lower_control_points, dtype=float).copy()
     baseline_upper_knots = None if proc.upper_knot_vector is None else np.asarray(proc.upper_knot_vector, dtype=float).copy()
@@ -183,7 +169,6 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
         ):
             return float("inf")
         upper_error = pure_surface_fit_error(
-            metric,
             proc.upper_original_data,
             proc.upper_control_points,
             proc.upper_knot_vector,
@@ -191,7 +176,6 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
             exponent_guess=float(getattr(proc, "param_exponent_upper", 0.5)),
         )
         lower_error = pure_surface_fit_error(
-            metric,
             proc.lower_original_data,
             proc.lower_control_points,
             proc.lower_knot_vector,
@@ -200,7 +184,7 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
         )
         return float(upper_error + lower_error)
 
-    baseline_error = pure_fit_total()
+    baseline_error = pure_fit_total() if use_existing_knot_vectors else float("inf")
     cp_counts = (proc.num_cp_upper, proc.num_cp_lower)
     upper_te_dir = None if getattr(proc, "upper_te_dir", None) is None else np.asarray(proc.upper_te_dir, dtype=float).copy()
     lower_te_dir = None if getattr(proc, "lower_te_dir", None) is None else np.asarray(proc.lower_te_dir, dtype=float).copy()
@@ -217,16 +201,9 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
             use_insertion_solver_settings=True,
         )
         if not success:
-            proc._fit_g1_independent(
-                proc.upper_original_data,
-                proc.lower_original_data,
-                cp_counts,
-                upper_te_dir=upper_te_dir,
-                lower_te_dir=lower_te_dir,
-                use_existing_knot_vectors=use_existing_knot_vectors,
-            )
+            return False
     else:
-        proc._fit_g1_independent(
+        success = proc._fit_g1_independent(
             proc.upper_original_data,
             proc.lower_original_data,
             cp_counts,
@@ -234,6 +211,9 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
             lower_te_dir=lower_te_dir,
             use_existing_knot_vectors=use_existing_knot_vectors,
         )
+
+    if not success:
+        return False
 
     final_error = pure_fit_total()
     tolerance = max(1e-12, abs(baseline_error) * 1e-9)
@@ -245,68 +225,46 @@ def refit_after_knot_insertion(proc, *, use_existing_knot_vectors: bool) -> bool
         proc.degree_upper = baseline_degree_upper
         proc.degree_lower = baseline_degree_lower
         proc.last_error_message = (
-            f"Refit after knot insertion worsened {metric} fit error "
+            f"Refit after knot insertion worsened vertical fit error "
             f"({baseline_error:.6e} -> {final_error:.6e}); reverted to shape-preserving inserted curve."
         )
         if isinstance(proc.last_optimizer_info, dict):
             proc.last_optimizer_info["insertion_refit_reverted"] = True
             proc.last_optimizer_info["insertion_refit_baseline_error"] = float(baseline_error)
             proc.last_optimizer_info["insertion_refit_final_error"] = float(final_error)
-            proc.last_optimizer_info["insertion_refit_metric"] = metric
+            proc.last_optimizer_info["insertion_refit_metric"] = "vertical"
     return True
 
 
 def refine_curve_with_knots(proc, new_knots: list[float], surface: str | None = None) -> bool:
-    if not proc.fitted or proc.upper_curve is None or proc.lower_curve is None:
-        return False
-    if not new_knots:
-        return True
-    try:
-        degree_changed = apply_knot_insertions(proc, new_knots, surface=surface)
-        if degree_changed is None:
-            return False
-        if not refit_after_knot_insertion(proc, use_existing_knot_vectors=not degree_changed):
-            return False
-        proc._finalize_curves()
-        proc._validate_continuity()
-        return True
-    except Exception as exc:
-        proc.last_error_message = f"refine_curve_with_knots failed: {exc}"
-        return False
+    if surface not in (None, "upper", "lower"):
+        raise ValueError("Surface must be upper, lower or None.")
+    return refine_curves_with_surface_knots(
+        proc, upper_knots=new_knots if surface in (None, "upper") else None,
+        lower_knots=new_knots if surface in (None, "lower") else None)
 
 
-def refine_curves_with_surface_knots(
-    proc,
-    *,
-    upper_knots: list[float] | None = None,
-    lower_knots: list[float] | None = None,
-) -> bool:
-    if not proc.fitted or proc.upper_curve is None or proc.lower_curve is None:
+def refine_curves_with_surface_knots(proc, *, upper_knots=None, lower_knots=None) -> bool:
+    """Insert knots at fixed degree and refit; failed attempts leave the old fit intact."""
+    if not proc.is_fitted():
         return False
-
-    upper_knots = upper_knots or []
-    lower_knots = lower_knots or []
     if not upper_knots and not lower_knots:
         return True
-
+    before = deepcopy(proc.__dict__)
     try:
-        degree_changed = False
-        if upper_knots:
-            upper_changed = apply_knot_insertions(proc, upper_knots, surface="upper")
-            if upper_changed is None:
-                return False
-            degree_changed = upper_changed or degree_changed
-        if lower_knots:
-            lower_changed = apply_knot_insertions(proc, lower_knots, surface="lower")
-            if lower_changed is None:
-                return False
-            degree_changed = lower_changed or degree_changed
-
-        if not refit_after_knot_insertion(proc, use_existing_knot_vectors=not degree_changed):
-            return False
+        for surface, knots in (("upper", upper_knots), ("lower", lower_knots)):
+            if knots and apply_knot_insertions(proc, knots, surface=surface) is None:
+                raise RuntimeError(proc.last_error_message or "Knot insertion failed.")
+        if not refit_after_knot_insertion(proc, use_existing_knot_vectors=True):
+            raise RuntimeError(proc.last_error_message or "Refitting failed.")
+        proc.fitted_degree = (proc.degree_upper, proc.degree_lower)
         proc._finalize_curves()
         proc._validate_continuity()
         return True
     except Exception as exc:
-        proc.last_error_message = f"refine_curves_with_surface_knots failed: {exc}"
+        diagnostics = deepcopy(proc.last_optimizer_info)
+        proc.__dict__.clear()
+        proc.__dict__.update(before)
+        proc.last_error_message = str(exc)
+        proc.last_optimizer_info = diagnostics
         return False

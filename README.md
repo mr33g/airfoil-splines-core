@@ -1,22 +1,11 @@
-# AirfoilFitCore
+# AirfoilFit
 
-A Python library for fitting B-spline curves to airfoil coordinate data.
-Only NumPy and SciPy are required. It imports no Fusion, Qt, or plotting UI modules.
-
-## Status
-
-Version 0.1.0 extracts the current Fusion fitting implementation without changing
-its numerical algorithms. Fusion logging is replaced by standard Python logging.
-The API is provisional until the standalone and mass-fitting interfaces are reconciled.
-
-Intended consumers:
-
-- AirfoilFitter: legacy Fusion add-in, pinned to a validated library release.
-- AirfoilSpline: parametric Fusion add-in.
-- AirfoilFitter desktop application: UI and exports stay in the application.
-- AF-tests: mass-fitting and analytics depend directly on this package, not an app or UI.
-
-## Installation
+Headless B-spline fitting for airfoil coordinate data, using NumPy and SciPy.
+The shared solver uses vertical fitting error with G1, G2 or G3 leading-edge
+continuity. Callers specify degrees and control-point counts explicitly for each
+surface; knot insertion always preserves degree. The fitter infers trailing-edge
+geometry from its input surfaces. `apply_te_thickness_to_reference` in
+`airfoil_fit.bspline_helper` adjusts those surfaces to a requested thickness.
 
 ```sh
 python -m pip install .
@@ -24,16 +13,26 @@ python -m unittest discover -s tests
 ```
 
 ```python
-from airfoil_fit_core import BSplineProcessor, load_airfoil_data
+from airfoil_fit import BSplineProcessor, load_airfoil_data, export_bspline_to_bsp
 
-upper, lower, name, blunt_te, te_thickness = load_airfoil_data("profile.dat")
+data = load_airfoil_data("profile.dat")
 fit = BSplineProcessor(degree=7)
-ok = fit.fit_bspline(upper, lower, num_control_points=8,
-                     enforce_g2=True, single_span=True)
+if fit.fit_bspline(data.upper, data.lower, num_control_points=8,
+                   continuity=2, smoothing_weight=0.001):
+    export_bspline_to_bsp(fit, data.name, "profile.bsp")
 ```
 
-The loader currently returns the Fusion five-value tuple. The standalone loader
-uses four values; this must be adapted explicitly during migration. Applications
-must pin a tested release and bundle its wheel for offline installation.
+`load_airfoil_data` returns named fields `upper`, `lower`, `name`, `blunt_te`,
+and `te_thickness`. Repaneling can be controlled per call. `AirfoilProcessor`
+also supplies original normalized reference points and trailing-edge tangents.
+Pass continuity and smoothing explicitly to each fit; degree is required when
+constructing the fitter and may be an `(upper, lower)` pair. Application defaults
+and single-span restrictions belong to consumers. `fit_bspline` returns a
+`FitResult` with success, requested/achieved continuity, message and diagnostics.
+A failed fit does not silently relax continuity or expose an initial estimate as
+fitted geometry. Failed refinement leaves the previous valid geometry intact.
 
-See MIGRATION.md for the remaining consumer integration work.
+`parse_airfoil_data(text)` parses embedded DAT contents without file I/O;
+`AirfoilProcessor.load_text(text)` also prepares reference points and tangents.
+Already prepared coordinate arrays can be passed directly to `fit_bspline`.
+Vertical residual metrics are in `airfoil_fit.optimization.fit_metrics`.

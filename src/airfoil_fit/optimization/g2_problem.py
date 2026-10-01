@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import numpy as np
-from airfoil_fit_core import config
-from airfoil_fit_core.optimization.continuity_metrics import (
+from airfoil_fit import config
+from airfoil_fit.optimization.continuity_metrics import (
     curvature_derivative_value_and_cp_grad,
     curvature_value_and_cp_grad,
     finite_diff_jacobian,
     start_derivative_weights,
 )
-from airfoil_fit_core.optimization.control_point_mapping import (
+from airfoil_fit.optimization.control_point_mapping import (
     OptimizationLayout,
     build_bounds,
     fourth_difference_smoothing_weights,
 )
-from airfoil_fit_core.optimization.fit_metrics import vertical_distance_and_grad
-from airfoil_fit_core.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
+from airfoil_fit.optimization.fit_metrics import vertical_distance_and_grad
+from airfoil_fit.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
 
 
 def build_g2_problem(
@@ -37,7 +37,6 @@ def build_g2_problem(
     layout: OptimizationLayout,
     vars_to_control_points_fn,
     enforce_g3: bool,
-    fit_error_metric: str = "msr",
 ) -> dict:
     num_cp_upper = int(layout.num_cp_upper)
     num_cp_lower = int(layout.num_cp_lower)
@@ -45,10 +44,6 @@ def build_g2_problem(
 
     smooth_w_upper = fourth_difference_smoothing_weights(num_cp_upper)
     smooth_w_lower = fourth_difference_smoothing_weights(num_cp_lower)
-
-    metric = str(fit_error_metric).strip()
-    if metric not in {"msr", "vertical"}:
-        metric = "msr"
 
     vertical_eval_state = {
         "last_x": None,
@@ -128,21 +123,11 @@ def build_g2_problem(
             return
 
         cp_upper, cp_lower = cached_control_points(x)
-        if metric == "msr":
-            fitted_upper = basis_upper @ cp_upper
-            fitted_lower = basis_lower @ cp_lower
-            residual_upper = fitted_upper - upper_data
-            residual_lower = fitted_lower - lower_data
-            error_upper = float(np.sum(residual_upper * residual_upper))
-            error_lower = float(np.sum(residual_lower * residual_lower))
-            grad_cp_upper = 2.0 * (basis_upper.T @ residual_upper)
-            grad_cp_lower = 2.0 * (basis_lower.T @ residual_lower)
-        else:
-            ensure_vertical_eval(cp_upper, cp_lower, x)
-            error_upper = float(vertical_eval_state["last_error_upper"])
-            error_lower = float(vertical_eval_state["last_error_lower"])
-            grad_cp_upper = np.asarray(vertical_eval_state["last_grad_upper"], dtype=float).copy()
-            grad_cp_lower = np.asarray(vertical_eval_state["last_grad_lower"], dtype=float).copy()
+        ensure_vertical_eval(cp_upper, cp_lower, x)
+        error_upper = float(vertical_eval_state["last_error_upper"])
+        error_lower = float(vertical_eval_state["last_error_lower"])
+        grad_cp_upper = np.asarray(vertical_eval_state["last_grad_upper"], dtype=float).copy()
+        grad_cp_lower = np.asarray(vertical_eval_state["last_grad_lower"], dtype=float).copy()
 
         fit_eval_state["x"] = x.copy()
         fit_eval_state["error_upper"] = error_upper
@@ -442,9 +427,8 @@ def build_g2_problem(
         ]
     )
 
-    if metric == "vertical":
-        append_monotonic_x_constraints(True, num_cp_upper)
-        append_monotonic_x_constraints(False, num_cp_lower)
+    append_monotonic_x_constraints(True, num_cp_upper)
+    append_monotonic_x_constraints(False, num_cp_lower)
 
     bounds = build_bounds(num_cp_upper - 3, num_cp_lower - 3)
     return {
@@ -453,7 +437,7 @@ def build_g2_problem(
         "objective_jac": objective_jac,
         "constraints": constraints,
         "bounds": bounds,
-        "fit_error_metric": metric,
+        "fit_error_metric": "vertical",
         "fit_error_samples": -1,
         "fit_error_samples_coarse": -1,
         "fit_error_samples_medium": -1,

@@ -1,7 +1,9 @@
+from typing import NamedTuple
+
 import numpy as np
 from scipy.interpolate import CubicSpline
 
-from airfoil_fit_core import config
+from airfoil_fit import config
 
 
 def _remove_consecutive_duplicates(points: np.ndarray, tol: float = 1e-12) -> np.ndarray:
@@ -413,20 +415,38 @@ def normalize_airfoil_data(
     return upper_normalized, lower_normalized
 
 
-def load_airfoil_data(filename, logger_func=print, repanel_input: bool | None = None):
-    """
-    Loads airfoil coordinates from a file, supporting Selig and Lednicer .dat formats.
+class AirfoilData(NamedTuple):
+    """Normalized LE-to-TE surfaces and trailing-edge geometry from the input."""
 
-    Returns:
-        tuple: (upper_surface_coords, lower_surface_coords, airfoil_name, thickened, te_thickness)
-    """
+    upper: np.ndarray
+    lower: np.ndarray
+    name: str
+    blunt_te: bool
+    te_thickness: float
+
+
+def load_airfoil_data(filename, logger_func=print, repanel_input: bool | None = None, *,
+                      points_per_surface: int = config.INPUT_REPANEL_POINTS_PER_SURFACE,
+                      le_bunch: float = config.INPUT_REPANEL_LE_BUNCH,
+                      te_bunch: float = config.INPUT_REPANEL_TE_BUNCH) -> AirfoilData:
+    """Read a DAT file; parsing and preparation are also available for text."""
+    with open(filename, "r") as stream:
+        text = stream.read()
+    return parse_airfoil_data(text, logger_func=logger_func, repanel_input=repanel_input,
+                             points_per_surface=points_per_surface,
+                             le_bunch=le_bunch, te_bunch=te_bunch)
+
+
+def parse_airfoil_data(text: str, logger_func=print, repanel_input: bool | None = None, *,
+                      points_per_surface: int = config.INPUT_REPANEL_POINTS_PER_SURFACE,
+                      le_bunch: float = config.INPUT_REPANEL_LE_BUNCH,
+                      te_bunch: float = config.INPUT_REPANEL_TE_BUNCH) -> AirfoilData:
+    """Parse Selig or Lednicer DAT text into normalized surfaces."""
     input_repanel = config.ENABLE_INPUT_REPANELING if repanel_input is None else bool(repanel_input)
-
-    with open(filename, "r") as f:
-        lines = [line.strip() for line in f.readlines() if line.strip()]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     if not lines:
-        raise ValueError(f"Airfoil data file '{filename}' is empty or contains no valid data.")
+        raise ValueError("Airfoil data is empty or contains no valid data.")
 
     airfoil_name = lines[0]
     coords_start_line = 1
@@ -521,9 +541,9 @@ def load_airfoil_data(filename, logger_func=print, repanel_input: bool | None = 
             all_coords,
             logger_func,
             repanel=input_repanel,
-            points_per_surface=config.INPUT_REPANEL_POINTS_PER_SURFACE,
-            le_bunch=config.INPUT_REPANEL_LE_BUNCH,
-            te_bunch=config.INPUT_REPANEL_TE_BUNCH,
+            points_per_surface=points_per_surface,
+            le_bunch=le_bunch,
+            te_bunch=te_bunch,
         )
 
     # Always normalize the data to ensure consistency.
@@ -533,9 +553,9 @@ def load_airfoil_data(filename, logger_func=print, repanel_input: bool | None = 
         logger_func,
         real_le_prepared=is_lednicer is False,
         repanel=input_repanel,
-        points_per_surface=config.INPUT_REPANEL_POINTS_PER_SURFACE,
-        le_bunch=config.INPUT_REPANEL_LE_BUNCH,
-        te_bunch=config.INPUT_REPANEL_TE_BUNCH,
+        points_per_surface=points_per_surface,
+        le_bunch=le_bunch,
+        te_bunch=te_bunch,
     )
 
     # Detect thickened trailing edge (symmetric about y=0)
@@ -550,7 +570,7 @@ def load_airfoil_data(filename, logger_func=print, repanel_input: bool | None = 
         thickened = True
         logger_func("Trailing edge is thickened and symmetric about y=0.")
 
-    return upper_surface, lower_surface, airfoil_name, thickened, te_thickness
+    return AirfoilData(upper_surface, lower_surface, airfoil_name, thickened, te_thickness)
 
 
 def find_shoulder_x_coords(upper_data, lower_data):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from scipy import interpolate
 
-from airfoil_fit_core import bspline_helper
+from airfoil_fit import bspline_helper
 
 
 def build_basis_derivative_matrix(
@@ -220,7 +220,6 @@ def vertical_error_metrics(
 
 
 def pure_surface_fit_error(
-    metric: str,
     data_points: np.ndarray,
     control_points: np.ndarray,
     knot_vector: np.ndarray,
@@ -228,7 +227,6 @@ def pure_surface_fit_error(
     *,
     exponent_guess: float = 0.5,
 ) -> float:
-    _ = metric
     error, _, _, _ = vertical_distance_and_grad(
         data_points,
         control_points,

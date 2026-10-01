@@ -3,17 +3,10 @@ from __future__ import annotations
 import numpy as np
 from scipy import optimize
 
-from airfoil_fit_core import config
-from airfoil_fit_core.optimization.fit_metrics import vertical_distance_and_grad
-from airfoil_fit_core.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
-from airfoil_fit_core import bspline_helper
-
-
-def _resolve_pure_fit_error_metric() -> str:
-    metric = str(getattr(config, "FIT_ERROR_OBJECTIVE", "msr")).strip().lower()
-    if metric in {"msr", "vertical"}:
-        return metric
-    return "msr"
+from airfoil_fit import config
+from airfoil_fit.optimization.fit_metrics import vertical_distance_and_grad
+from airfoil_fit.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
+from airfoil_fit import bspline_helper
 
 
 def _pack_control_points(cp: np.ndarray) -> np.ndarray:
@@ -232,7 +225,7 @@ def fit_g1_independent(
     lower_te_dir: np.ndarray | None,
     enable_soft_te_handle_quality: bool = True,
     use_existing_knot_vectors: bool = False,
-) -> None:
+) -> bool:
     """Fit surfaces independently with G1 constraint only."""
     _ = num_control_points
     te_point_upper = upper_data[-1]
@@ -254,6 +247,7 @@ def fit_g1_independent(
     num_control_points_upper = len(proc.upper_knot_vector) - proc.degree_upper - 1
     num_control_points_lower = len(proc.lower_knot_vector) - proc.degree_lower - 1
 
+    proc._g1_surface_info = []
     proc.upper_control_points = fit_single_surface_g1(
         proc,
         basis_upper,
@@ -272,28 +266,19 @@ def fit_g1_independent(
         soft_te_tangent_vector=lower_te_dir if enable_soft_te_handle_quality else None,
         te_point=te_point_lower,
     )
-    pure_metric = _resolve_pure_fit_error_metric()
+    success = all(info["success"] for info in proc._g1_surface_info)
     proc.last_optimizer_info = {
-        "success": True,
-        "accepted": True,
-        "status": 0,
-        "message": (
-            "G1 independent fit solved with MSR objective."
-            if pure_metric == "msr"
-            else "G1 independent fit solved with vertical objective."
-        ),
-        "iterations": -1,
-        "objective": float("nan"),
-        "max_constraint_violation": 0.0,
-        "solver_ftol": float("nan"),
-        "solver_maxiter": -1,
+        "success": success, "accepted": success,
+        "surfaces": list(proc._g1_surface_info),
+        "fit_error_metric": "vertical", "mode": "g1_independent",
         "insertion_mode": bool(use_existing_knot_vectors),
-        "fit_error_metric": pure_metric,
-        "fit_error_samples": -1,
-        "te_handle_weight": float(getattr(config, "DEFAULT_TE_HANDLE_QUALITY_WEIGHT", np.nan)),
-        "te_handle_min_length": float(getattr(config, "TE_HANDLE_MIN_LENGTH", np.nan)),
-        "mode": "g1_independent",
     }
+    if not success:
+        proc.last_error_message = "; ".join(
+            f"G1 {info['surface']} failed (status={info['status']}): {info['message']}"
+            for info in proc._g1_surface_info if not info["success"])
+    return success
+
 
 
 def fit_single_surface_g1(
@@ -305,7 +290,7 @@ def fit_single_surface_g1(
     soft_te_tangent_vector: np.ndarray | None = None,
     te_point: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Fit single surface with G1/endpoint constraints and the selected fit objective."""
+    """Fit single surface with G1/endpoint constraints and vertical error."""
     knot_vector = proc.upper_knot_vector if is_upper else proc.lower_knot_vector
     degree = proc.degree_upper if is_upper else proc.degree_lower
     if knot_vector is None:
@@ -350,12 +335,8 @@ def fit_single_surface_g1(
         vertical_eval_state["u"] = solved_u
 
     def fit_error_for_scaling(cp: np.ndarray, vars_flat: np.ndarray) -> float:
-        if _resolve_pure_fit_error_metric() == "vertical":
-            ensure_vertical_eval(vars_flat, cp)
-            return float(vertical_eval_state["error"])
-        fitted = basis_matrix @ cp
-        residual = fitted - surface_data
-        return float(np.sum(residual * residual))
+        ensure_vertical_eval(vars_flat, cp)
+        return float(vertical_eval_state["error"])
 
     cp0 = _unpack_control_points(x0, num_control_points)
     raw_te0, _, _ = te_handle_quality_penalty_and_grad(
@@ -389,33 +370,10 @@ def fit_single_surface_g1(
 
         return _pack_control_points(grad_cp)
 
-    def objective_msr(vars_flat: np.ndarray) -> float:
-        cp = _unpack_control_points(vars_flat, num_control_points)
-        fitted = basis_matrix @ cp
-        residual = fitted - surface_data
-        error = float(np.sum(residual * residual))
-        penalty, _ = _fourth_difference_penalty_and_grad(cp, smooth_w, smoothing_weight)
-        error += penalty
-        te_penalty, _, _ = _scaled_te_handle_penalty_and_grad(cp, soft_te_tangent_vector, te_handle_scale)
-        error += te_penalty
-        return error
-
-    def objective_msr_jac(vars_flat: np.ndarray) -> np.ndarray:
-        cp = _unpack_control_points(vars_flat, num_control_points)
-        fitted = basis_matrix @ cp
-        residual = fitted - surface_data
-        grad_cp = 2.0 * (basis_matrix.T @ residual)
-        _, smooth_grad = _fourth_difference_penalty_and_grad(cp, smooth_w, smoothing_weight)
-        grad_cp += smooth_grad
-        _, te_grad, _ = _scaled_te_handle_penalty_and_grad(cp, soft_te_tangent_vector, te_handle_scale)
-        grad_cp += te_grad
-        return _pack_control_points(grad_cp)
-
-    pure_metric = _resolve_pure_fit_error_metric()
     constraints = _build_linear_constraints(
         num_control_points,
         te_point,
-        enforce_monotonic_x=(pure_metric == "vertical"),
+        enforce_monotonic_x=True,
     )
     bounds: list[tuple[float | None, float | None]] = [(None, None)] * (2 * num_control_points)
     y1_idx = num_control_points + 1
@@ -425,23 +383,36 @@ def fit_single_surface_g1(
         bounds[y1_idx] = (None, 0.0)
 
     max_iter = max(300, 20 * num_control_points)
-    if pure_metric == "vertical":
-        objective_fn = objective_vertical
-        objective_jac_fn = objective_vertical_jac
-    else:
-        objective_fn = objective_msr
-        objective_jac_fn = objective_msr_jac
     result = optimize.minimize(
-        objective_fn,
+        objective_vertical,
         x0,
         method="SLSQP",
-        jac=objective_jac_fn,
+        jac=objective_vertical_jac,
         constraints=constraints,
         bounds=bounds,
         options={"ftol": 1e-8, "maxiter": max_iter, "disp": False},
     )
 
-    final_vars = result.x if bool(result.success or result.status == 0) else x0
+    x = np.asarray(result.x, dtype=float)
+    violations = [abs(float(c["fun"](x))) if c["type"] == "eq"
+                  else max(0.0, -float(c["fun"](x))) for c in constraints]
+    for value, (lo, hi) in zip(x, bounds):
+        if lo is not None:
+            violations.append(max(0.0, lo - value))
+        if hi is not None:
+            violations.append(max(0.0, value - hi))
+    violation = max(violations, default=0.0) if np.isfinite(x).all() else float("inf")
+    success = bool(result.success and np.isfinite(result.fun) and violation <= 2e-5)
+    info = dict(surface="upper" if is_upper else "lower", success=success,
+                status=int(result.status), message=str(result.message),
+                iterations=int(getattr(result, "nit", -1)), objective=float(result.fun),
+                max_constraint_violation=violation, used_initial_estimate=not success)
+    if not hasattr(proc, "_g1_surface_info"):
+        proc._g1_surface_info = []
+    proc._g1_surface_info.append(info)
+    # An initial estimate remains useful to initialize the joint solver, but is
+    # never reported as a successful independent fit.
+    final_vars = result.x if success else x0
     control_points = _unpack_control_points(final_vars, num_control_points)
     control_points[0] = [0.0, 0.0]
     control_points[1, 0] = 0.0

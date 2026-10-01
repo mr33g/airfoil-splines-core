@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from airfoil_fit_core import bspline_helper
+from airfoil_fit import bspline_helper
 
 
 def start_derivative_weights(

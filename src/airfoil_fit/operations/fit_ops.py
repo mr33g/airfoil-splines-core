@@ -4,14 +4,13 @@ import logging
 import numpy as np
 from scipy import optimize
 
-from airfoil_fit_core import config
-from airfoil_fit_core.optimization import (
+from airfoil_fit.optimization import (
     OptimizationLayout,
     build_g2_problem,
     control_points_to_initial_vars,
     vars_to_control_points,
 )
-from airfoil_fit_core import bspline_helper
+from airfoil_fit import bspline_helper
 
 
 def fit_bspline(
@@ -19,15 +18,18 @@ def fit_bspline(
     upper_data: np.ndarray,
     lower_data: np.ndarray,
     num_control_points: int | tuple[int, int],
-    is_thickened: bool = False,
+    *,
+    continuity: int,
+    smoothing_weight: float,
     upper_te_tangent_vector: np.ndarray | None = None,
     lower_te_tangent_vector: np.ndarray | None = None,
-    enforce_g2: bool = False,
-    enforce_g3: bool = False,
-    single_span: bool = False,
 ) -> bool:
     """Fit B-splines with G1 and optional G2 constraints at leading edge."""
     try:
+        proc.fitted = False
+        proc.upper_curve = proc.lower_curve = None
+        proc.upper_control_points = proc.lower_control_points = None
+        proc.upper_knot_vector = proc.lower_knot_vector = None
         proc.last_error_message = None
         proc.last_optimizer_info = None
         proc.last_insertion_info = None
@@ -37,19 +39,25 @@ def fit_bspline(
         else:
             num_cp_upper = num_cp_lower = num_control_points
 
-        proc.num_cp_upper = num_cp_upper
-        proc.num_cp_lower = num_cp_lower
-        proc.enforce_g2 = enforce_g2
-        proc.enforce_g3 = enforce_g3 if enforce_g2 else False
+        if not isinstance(continuity, (int, np.integer)) or isinstance(continuity, bool) or continuity not in (1, 2, 3):
+            raise ValueError("Continuity must be 1, 2 or 3.")
+        if not np.isfinite(smoothing_weight) or smoothing_weight < 0:
+            raise ValueError("Smoothing weight must be finite and nonnegative.")
+        for count, degree in ((num_cp_upper, proc.degree_upper), (num_cp_lower, proc.degree_lower)):
+            if isinstance(count, bool) or not isinstance(count, (int, np.integer)) or count < max(4, degree + 1):
+                raise ValueError("Each control-point count must be an integer >= max(4, degree + 1).")
+            if degree < continuity:
+                raise ValueError("Spline degree must be at least the requested continuity order.")
+        upper_data = np.asarray(upper_data, dtype=float)
+        lower_data = np.asarray(lower_data, dtype=float)
+        for data in (upper_data, lower_data):
+            if data.ndim != 2 or data.shape[1] != 2 or len(data) < 2 or not np.isfinite(data).all():
+                raise ValueError("Provide finite Nx2 surface coordinates.")
+        proc.num_cp_upper, proc.num_cp_lower = int(num_cp_upper), int(num_cp_lower)
+        proc.enforce_g2, proc.enforce_g3 = continuity >= 2, continuity == 3
+        proc.smoothing_weight = float(smoothing_weight)
 
-        if single_span:
-            proc.degree_upper = num_cp_upper - 1
-            proc.degree_lower = num_cp_lower - 1
-        else:
-            proc.degree_upper = proc.degree
-            proc.degree_lower = proc.degree
-
-        proc.is_sharp_te = not is_thickened
+        proc.is_sharp_te = bool(np.linalg.norm(upper_data[-1] - lower_data[-1]) <= 1e-8)
 
         le_point = (upper_data[0] + lower_data[0]) / 2
         upper_data_corrected = upper_data.copy()
@@ -80,11 +88,10 @@ def fit_bspline(
                 lower_te_dir,
             )
             if not success:
-                proc.enforce_g2 = False
-                proc.enforce_g3 = False
+                return False
 
         if not proc.enforce_g2:
-            proc._fit_g1_independent(
+            success = proc._fit_g1_independent(
                 upper_data_corrected,
                 lower_data_corrected,
                 (proc.num_cp_upper, proc.num_cp_lower),
@@ -92,6 +99,9 @@ def fit_bspline(
                 lower_te_dir,
                 enable_soft_te_handle_quality=True,
             )
+
+        if not success:
+            return False
 
         proc._finalize_curves()
         proc.fitted_degree = (proc.degree_upper, proc.degree_lower)
@@ -194,7 +204,6 @@ def fit_with_g2_optimization(
             layout=layout,
             vars_to_control_points_fn=lambda x: vars_to_control_points(x, num_cp_upper, num_cp_lower),
             enforce_g3=proc.enforce_g3,
-            fit_error_metric=str(getattr(config, "FIT_ERROR_OBJECTIVE", "vertical")),
         )
 
         num_vars = layout.num_vars
@@ -227,7 +236,7 @@ def fit_with_g2_optimization(
             options={"ftol": ftol, "maxiter": max_iter, "disp": False},
         )
 
-        max_constraint_violation = 0.0
+        max_constraint_violation = 0.0 if getattr(result, "x", None) is not None else float("inf")
         x_final = np.asarray(result.x, dtype=float) if getattr(result, "x", None) is not None else np.asarray(initial_vars, dtype=float)
         if getattr(result, "x", None) is not None:
             for constraint in problem["constraints"]:
@@ -238,20 +247,22 @@ def fit_with_g2_optimization(
                         violation = float(np.max(np.maximum(0.0, -cval)))
                     else:
                         violation = float(np.max(np.abs(cval)))
-                    max_constraint_violation = max(max_constraint_violation, violation)
+                    max_constraint_violation = max(max_constraint_violation, violation) if np.isfinite(violation) else float("inf")
 
-        relaxed_success = (
-            int(getattr(result, "status", -1)) == 9
-            and np.isfinite(max_constraint_violation)
-            and max_constraint_violation <= 2e-5
-        )
-        accepted = bool(result.success or result.status == 0 or relaxed_success)
+        for value, (lo, hi) in zip(x_final, problem["bounds"]):
+            if lo is not None:
+                max_constraint_violation = max(max_constraint_violation, lo - value)
+            if hi is not None:
+                max_constraint_violation = max(max_constraint_violation, value - hi)
+        accepted = bool(result.success and np.isfinite(x_final).all()
+                        and np.isfinite(getattr(result, "fun", np.nan))
+                        and max_constraint_violation <= 2e-5)
         initial_diag = dict(problem["evaluate_diagnostics"](np.asarray(initial_vars, dtype=float)))
         final_diag = dict(problem["evaluate_diagnostics"](x_final))
         proc.last_optimizer_info = {
             "success": bool(result.success),
             "accepted": accepted,
-            "accepted_via_relaxed_criteria": bool(relaxed_success),
+            "accepted_via_relaxed_criteria": False,
             "status": int(result.status),
             "message": str(result.message),
             "iterations": int(getattr(result, "nit", -1)),
@@ -290,7 +301,9 @@ def fit_with_g2_optimization(
             proc.upper_control_points, proc.lower_control_points = vars_to_control_points(result.x, num_cp_upper, num_cp_lower)
             return True
 
-        proc.last_error_message = f"G2 optimization failed (status={result.status}): {result.message}"
+        continuity = 3 if proc.enforce_g3 else 2
+        proc.last_error_message = (f"G{continuity} optimization failed (status={result.status}, "
+                                   f"constraint violation={max_constraint_violation:.3g}): {result.message}")
         logger = logging.getLogger(__name__)
         logger.error(f"Error in _fit_with_g2_optimization: Optimization failed with status {result.status}")
         return False

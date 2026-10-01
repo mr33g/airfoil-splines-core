@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from scipy import interpolate
 
-from airfoil_fit_core import config
+from airfoil_fit import config
 
 
 def finalize_curves(proc) -> None:

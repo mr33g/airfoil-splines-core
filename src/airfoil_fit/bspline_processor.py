@@ -4,8 +4,9 @@ import numpy as np
 from scipy import interpolate
 import logging
 
-from airfoil_fit_core import config
-from airfoil_fit_core.operations import (
+from airfoil_fit import config
+from airfoil_fit.fit_result import FitResult
+from airfoil_fit.operations import (
     apply_knot_insertions,
     cp_spacing_violates_minimum,
     finalize_curves,
@@ -20,10 +21,10 @@ from airfoil_fit_core.operations import (
     refit_after_knot_insertion,
     validate_continuity,
 )
-from airfoil_fit_core.optimization import (
+from airfoil_fit.optimization import (
     vars_to_control_points,
 )
-from airfoil_fit_core import bspline_helper
+from airfoil_fit import bspline_helper
 
 class BSplineProcessor:
     """
@@ -31,32 +32,33 @@ class BSplineProcessor:
     Works with arbitrary degree B-splines.
     """
 
-    def __init__(self, degree: int = config.DEFAULT_CP_COUNT-1):
+    def __init__(self, degree: int | tuple[int, int]):
         self.upper_control_points: np.ndarray | None = None
         self.lower_control_points: np.ndarray | None = None
         self.upper_knot_vector: np.ndarray | None = None
         self.lower_knot_vector: np.ndarray | None = None
         self.upper_curve: interpolate.BSpline | None = None
         self.lower_curve: interpolate.BSpline | None = None
-        self.degree: int = int(degree)
-        self.degree_upper: int = int(degree)
-        self.degree_lower: int = int(degree)
-        self.fitted_degree: int | None = None  # Stores the actual degree used during fitting (may differ from self.degree if single span mode was used)
-        self.num_cp_upper: int = 10  # Current number of control points for upper surface
-        self.num_cp_lower: int = 10  # Current number of control points for lower surface
+        degrees = degree if isinstance(degree, tuple) else (degree, degree)
+        if len(degrees) != 2 or any(isinstance(d, bool) or not isinstance(d, (int, np.integer)) or d < 1 for d in degrees):
+            raise ValueError("Provide a positive integer degree for each surface.")
+        self.degree_upper, self.degree_lower = map(int, degrees)
+        self.fitted_degree: tuple[int, int] | None = None
+        self.num_cp_upper: int = 0  # Current number of control points for upper surface
+        self.num_cp_lower: int = 0  # Current number of control points for lower surface
         self.param_exponent_upper: float = 0.5 # Mapping x -> u (0.5 is sqrt)
         self.param_exponent_lower: float = 0.5
         self.fitted: bool = False
         self.is_sharp_te: bool = False
-        self.enforce_g2: bool = True
+        self.enforce_g2: bool = False
         self.enforce_g3: bool = False
-        self.g2_weight: float = 100.0  # Weight for G2 constraint in optimization
-        self.smoothing_weight: float = config.DEFAULT_SMOOTHNESS_PENALTY  # Weight for control point smoothing penalty
+        self.smoothing_weight: float = 0.0  # Weight for control point smoothing penalty
         self.min_cp_neighbor_distance: float = float(getattr(config, "MIN_CP_NEIGHBOR_DISTANCE", 0.0))
         # Tight insertion-mode SLSQP settings from tuned jacobian implementation.
         self.insertion_solver_ftol: float = 1e-10
         self.insertion_solver_maxiter_factor: float = 50.0
         self.insertion_solver_min_maxiter: int = 480
+        self.last_fit_result: FitResult | None = None
         self.last_error_message: str | None = None
         self.last_optimizer_info: dict | None = None
         self.last_insertion_info: dict | None = None
@@ -68,29 +70,33 @@ class BSplineProcessor:
 
 
     def fit_bspline(
-        self,
-        upper_data: np.ndarray,
-        lower_data: np.ndarray,
-        num_control_points: int | tuple[int, int],
-        is_thickened: bool = False,
+        self, upper_data: np.ndarray, lower_data: np.ndarray,
+        num_control_points: int | tuple[int, int], *,
+        continuity: int, smoothing_weight: float,
         upper_te_tangent_vector: np.ndarray | None = None,
         lower_te_tangent_vector: np.ndarray | None = None,
-        enforce_g2: bool = False,
-        enforce_g3: bool = False,
-        single_span: bool = False,
-    ) -> bool:
-        return fit_bspline_op(
-            self,
-            upper_data,
-            lower_data,
-            num_control_points,
-            is_thickened=is_thickened,
+    ) -> FitResult:
+        """Fit the explicit degrees/counts; never substitute a weaker continuity."""
+        success = fit_bspline_op(
+            self, upper_data, lower_data, num_control_points,
+            continuity=continuity, smoothing_weight=smoothing_weight,
             upper_te_tangent_vector=upper_te_tangent_vector,
             lower_te_tangent_vector=lower_te_tangent_vector,
-            enforce_g2=enforce_g2,
-            enforce_g3=enforce_g3,
-            single_span=single_span,
         )
+        if success:
+            self.last_error_message = None
+        else:
+            self.upper_control_points = self.lower_control_points = None
+            self.upper_knot_vector = self.lower_knot_vector = None
+            self.upper_curve = self.lower_curve = None
+            self.fitted_degree = None
+        from copy import deepcopy
+        self.last_fit_result = FitResult(
+            bool(success), continuity, continuity if success else None,
+            "Fit converged." if success else self.last_error_message or "Fit failed.",
+            deepcopy(self.last_optimizer_info or {}),
+        )
+        return self.last_fit_result
 
     def _fit_with_g2_optimization(
         self,
@@ -178,17 +184,18 @@ class BSplineProcessor:
             self.upper_curve, self.lower_curve, num_points_per_segment, scale_factor
         )
 
-    def insert_knot_at_max_error(self, surface: str, single_span: bool = False) -> bool:
+    def insert_knot_at_max_error(self, surface: str) -> bool:
         """
         Insert a knot at the location of maximum deviation on the specified surface.
         
         Args:
             surface: Which surface to insert knot into ('upper' or 'lower')
-            single_span: If True, update degree to maintain single span mode (degree = CP - 1)
             
         Returns:
             bool: True if knot was inserted successfully, False otherwise
         """
+        if surface not in {'upper', 'lower'}:
+            raise ValueError('Surface must be upper or lower.')
         if not self.fitted or self.upper_curve is None or self.lower_curve is None:
             return False
         
@@ -218,7 +225,7 @@ class BSplineProcessor:
                 self.param_exponent_lower = adjusted_param_exponent
             
             # Insert the knot using the existing refine method
-            # refine_curve_with_knots will automatically detect and maintain single span mode
+            # Knot insertion retains the explicitly requested degrees.
             success = self.refine_curve_with_knots([new_knot], surface=surface)
             
             return success
