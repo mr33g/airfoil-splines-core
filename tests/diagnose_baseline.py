@@ -9,6 +9,7 @@ from unittest.mock import patch
 from airfoil_fit import BSplineProcessor
 from airfoil_fit.operations import fit_ops
 from airfoil_fit.optimization import control_points_to_initial_vars
+from airfoil_fit.optimization.fit_metrics import solve_u_for_x_targets
 
 
 def report():
@@ -40,6 +41,10 @@ def report():
             curve = getattr(proc, side+'_curve')
             u = np.linspace(0, 1, 1001)
             info[side+'_max_curve_distance'] = float(np.max(np.linalg.norm(curve(u)-old(u),axis=1)))
+            targets = (1 - np.cos(np.linspace(0, np.pi, 1001))) / 2
+            new_u = solve_u_for_x_targets(targets, curve.c, curve.t, curve.k)
+            old_u = solve_u_for_x_targets(targets, old.c, old.t, old.k)
+            info[side+'_max_vertical_shape_difference'] = float(np.max(np.abs(curve(new_u)[:,1]-old(old_u)[:,1])))
             info[side+'_max_control_point_difference'] = float(np.max(np.abs(curve.c-old.c)))
         print(json.dumps(info, sort_keys=True))
 

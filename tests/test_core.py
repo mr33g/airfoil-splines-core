@@ -21,16 +21,55 @@ class CoreTests(unittest.TestCase):
                     self.assertNotIn(name.split(".")[0], forbidden, str(path))
 
     def test_fusion_baseline_continuity_modes(self):
+        from scipy.interpolate import BSpline
+        from airfoil_fit.operations import fit_ops
+        from airfoil_fit.optimization import control_points_to_initial_vars
+        from airfoil_fit.optimization.fit_metrics import solve_u_for_x_targets
         expected = json.loads((ROOT / "tests" / "fusion_baseline.json").read_text())
         x = (1 - np.cos(np.linspace(0, np.pi, 61))) / 2
         y = 5 * .12 * (.2969*np.sqrt(x)-.126*x-.3516*x*x+.2843*x**3-.1036*x**4)
         for mode in expected:
             with self.subTest(mode=mode):
+                problems = []
+                build = fit_ops.build_g2_problem
+                def capture(**kwargs):
+                    problem = build(**kwargs)
+                    problems.append(problem)
+                    return problem
                 proc = BSplineProcessor(degree=7)
-                self.assertTrue(proc.fit_bspline(np.column_stack([x,y]), np.column_stack([x,-y]), 8,
-                    continuity=int(mode[-1]), smoothing_weight=.001), proc.last_error_message)
-                np.testing.assert_allclose(proc.upper_control_points, expected[mode]["upper"], atol=1e-8, rtol=1e-7)
-                np.testing.assert_allclose(proc.lower_control_points, expected[mode]["lower"], atol=1e-8, rtol=1e-7)
+                with patch.object(fit_ops, 'build_g2_problem', side_effect=capture):
+                    self.assertTrue(proc.fit_bspline(np.column_stack([x,y]), np.column_stack([x,-y]), 8,
+                        continuity=int(mode[-1]), smoothing_weight=.001), proc.last_error_message)
+                for side in ('upper', 'lower'):
+                    cp = getattr(proc, side + '_control_points')
+                    reference = np.array(expected[mode][side])
+                    if mode != 'g3':
+                        np.testing.assert_allclose(cp, reference, atol=1e-8, rtol=1e-7)
+                        continue
+                    # SLSQP takes different G3 paths across platforms. Compare
+                    # physical y(x), not a particular control polygon or u mapping.
+                    curve = getattr(proc, side + '_curve')
+                    old = BSpline(curve.t, reference, curve.k)
+                    targets = (1 - np.cos(np.linspace(0, np.pi, 1001))) / 2
+                    u = solve_u_for_x_targets(targets, cp, curve.t, curve.k)
+                    old_u = solve_u_for_x_targets(targets, reference, curve.t, curve.k)
+                    max_delta = np.max(np.abs(curve(u)[:, 1] - old(old_u)[:, 1]))
+                    # One part per million of chord; endpoints remain exact.
+                    self.assertLessEqual(max_delta, 1e-6)
+                    np.testing.assert_allclose(curve([0, 1]), old([0, 1]), atol=1e-12)
+                if mode == 'g3':
+                    problem = problems[-1]
+                    base_vars = control_points_to_initial_vars(np.array(expected[mode]['upper']),
+                                                               np.array(expected[mode]['lower']), 8, 8)
+                    fitted_vars = control_points_to_initial_vars(proc.upper_control_points,
+                                                                 proc.lower_control_points, 8, 8)
+                    baseline_cost = problem['objective'](base_vars)
+                    self.assertLessEqual(problem['objective'](fitted_vars), baseline_cost * 1.0001)
+                    # Evaluate the actual constraints, not just the success flag.
+                    for constraint in problem['constraints']:
+                        values = np.asarray(constraint['fun'](fitted_vars))
+                        violation = np.abs(values) if constraint['type'] == 'eq' else np.maximum(0, -values)
+                        self.assertLessEqual(float(np.max(violation)), 2e-5)
 
     def surfaces(self, blunt=False):
         x = (1 - np.cos(np.linspace(0, np.pi, 61))) / 2
