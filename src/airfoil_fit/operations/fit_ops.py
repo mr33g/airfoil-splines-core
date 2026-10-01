@@ -236,24 +236,47 @@ def fit_with_g2_optimization(
             options={"ftol": ftol, "maxiter": max_iter, "disp": False},
         )
 
-        max_constraint_violation = 0.0 if getattr(result, "x", None) is not None else float("inf")
-        x_final = np.asarray(result.x, dtype=float) if getattr(result, "x", None) is not None else np.asarray(initial_vars, dtype=float)
-        if getattr(result, "x", None) is not None:
+        def constraint_violation(x):
+            if x is None or not np.isfinite(x).all():
+                return float("inf")
+            maximum = 0.0
             for constraint in problem["constraints"]:
-                cval = np.asarray(constraint["fun"](x_final), dtype=float).ravel()
-                if cval.size:
-                    ctype = str(constraint.get("type", "eq")).strip().lower()
-                    if ctype == "ineq":
-                        violation = float(np.max(np.maximum(0.0, -cval)))
-                    else:
-                        violation = float(np.max(np.abs(cval)))
-                    max_constraint_violation = max(max_constraint_violation, violation) if np.isfinite(violation) else float("inf")
+                values = np.asarray(constraint["fun"](x), dtype=float).ravel()
+                if not np.isfinite(values).all():
+                    return float("inf")
+                if values.size:
+                    violation = (np.maximum(0.0, -values)
+                                 if constraint.get("type", "eq") == "ineq" else np.abs(values))
+                    maximum = max(maximum, float(np.max(violation)))
+            for value, (lo, hi) in zip(x, problem["bounds"]):
+                if lo is not None:
+                    maximum = max(maximum, lo - value)
+                if hi is not None:
+                    maximum = max(maximum, value - hi)
+            return maximum
 
-        for value, (lo, hi) in zip(x_final, problem["bounds"]):
-            if lo is not None:
-                max_constraint_violation = max(max_constraint_violation, lo - value)
-            if hi is not None:
-                max_constraint_violation = max(max_constraint_violation, value - hi)
+        first_status = int(result.status)
+        first_iterations = int(getattr(result, "nit", 0))
+        restart_count = 0
+        x_final = np.asarray(result.x, dtype=float) if getattr(result, "x", None) is not None else None
+        max_constraint_violation = constraint_violation(x_final)
+        # G3 can stall with a nearly feasible iterate and an unhelpful SLSQP
+        # Hessian approximation. One fresh solve resets that internal state;
+        # it does not accept the exhausted result or relax any tolerance.
+        if (proc.enforce_g3 and not result.success and first_status == 9
+                and np.isfinite(getattr(result, "fun", np.nan))
+                and max_constraint_violation <= 2e-5):
+            restart_count = 1
+            result = optimize.minimize(
+                problem["objective"], x_final.copy(), method="SLSQP",
+                jac=problem["objective_jac"], constraints=problem["constraints"],
+                bounds=problem["bounds"],
+                options={"ftol": ftol, "maxiter": min(100, max_iter), "disp": False},
+            )
+            x_final = np.asarray(result.x, dtype=float) if getattr(result, "x", None) is not None else None
+            max_constraint_violation = constraint_violation(x_final)
+        if x_final is None:
+            x_final = np.asarray(initial_vars, dtype=float)
         accepted = bool(result.success and np.isfinite(x_final).all()
                         and np.isfinite(getattr(result, "fun", np.nan))
                         and max_constraint_violation <= 2e-5)
@@ -265,7 +288,11 @@ def fit_with_g2_optimization(
             "accepted_via_relaxed_criteria": False,
             "status": int(result.status),
             "message": str(result.message),
-            "iterations": int(getattr(result, "nit", -1)),
+            "iterations": (first_iterations + int(getattr(result, "nit", 0))
+                           if restart_count else first_iterations),
+            "restart_count": restart_count,
+            "initial_status": first_status,
+            "initial_iterations": first_iterations,
             "objective": float(getattr(result, "fun", np.nan)),
             "max_constraint_violation": float(max_constraint_violation),
             "solver_ftol": float(ftol),

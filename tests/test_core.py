@@ -228,6 +228,72 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(result.diagnostics['accepted'])
         self.assertIsNone(proc.upper_curve)
 
+    def test_g3_nearly_feasible_limit_restarts_with_same_tolerance(self):
+        from scipy import optimize
+        minimize = optimize.minimize
+        upper, lower = self.surfaces()
+        attempts = []
+        def limited_once(*args, **kwargs):
+            result = minimize(*args, **kwargs)
+            if kwargs['options']['ftol'] == 1e-7:
+                attempts.append(dict(kwargs['options']))
+                if len(attempts) == 1:
+                    self.assertTrue(result.success)
+                    result.success, result.status, result.message = False, 9, 'Iteration limit'
+            return result
+        proc = BSplineProcessor(degree=7)
+        with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=limited_once):
+            result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
+        self.assertTrue(result, result.message)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0]['ftol'], attempts[1]['ftol'])
+        self.assertLessEqual(attempts[1]['maxiter'], 100)
+        self.assertEqual(result.diagnostics['restart_count'], 1)
+        self.assertEqual(result.diagnostics['initial_status'], 9)
+        self.assertEqual(result.diagnostics['status'], 0)
+        self.assertFalse(result.diagnostics['accepted_via_relaxed_criteria'])
+
+    def test_g3_exhausted_restart_is_still_a_failure(self):
+        from scipy import optimize
+        minimize = optimize.minimize
+        upper, lower = self.surfaces()
+        attempts = []
+        def limited(*args, **kwargs):
+            result = minimize(*args, **kwargs)
+            if kwargs['options']['ftol'] == 1e-7:
+                attempts.append(result)
+                result.success, result.status, result.message = False, 9, 'Iteration limit'
+            return result
+        proc = BSplineProcessor(degree=7)
+        with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=limited):
+            result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
+        self.assertFalse(result)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(result.diagnostics['restart_count'], 1)
+        self.assertIsNone(proc.upper_curve)
+
+    def test_g3_nonfinite_or_infeasible_limits_are_not_restarted(self):
+        from scipy import optimize
+        minimize = optimize.minimize
+        upper, lower = self.surfaces()
+        for value in (float('nan'), .5):
+            with self.subTest(value=value):
+                attempts = []
+                def invalid(*args, **kwargs):
+                    result = minimize(*args, **kwargs)
+                    if kwargs['options']['ftol'] == 1e-7:
+                        attempts.append(result)
+                        result.x[0] = value
+                        result.success, result.status, result.message = False, 9, 'Iteration limit'
+                    return result
+                proc = BSplineProcessor(degree=7)
+                with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=invalid):
+                    result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
+                self.assertFalse(result)
+                self.assertEqual(len(attempts), 1)
+                self.assertEqual(result.diagnostics['restart_count'], 0)
+                self.assertIsNone(proc.upper_curve)
+
     def test_failed_refinement_preserves_existing_geometry(self):
         upper, lower = self.surfaces()
         proc = BSplineProcessor(degree=7)
