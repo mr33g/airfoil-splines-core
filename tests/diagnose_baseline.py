@@ -6,10 +6,10 @@ import numpy as np
 import scipy
 from scipy.interpolate import BSpline
 from unittest.mock import patch
-from airfoil_fit import BSplineProcessor
-from airfoil_fit.operations import fit_ops
-from airfoil_fit.optimization import control_points_to_initial_vars
-from airfoil_fit.optimization.fit_metrics import solve_u_for_x_targets
+from airfoil_splines_core import BSplineProcessor
+from airfoil_splines_core.operations import fit_ops
+from airfoil_splines_core.optimization import control_points_to_initial_vars
+from airfoil_splines_core.optimization.fit_metrics import solve_u_for_x_targets
 
 
 def report():

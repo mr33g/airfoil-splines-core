@@ -2,11 +2,11 @@
 import unittest
 import numpy as np
 from scipy.interpolate import BSpline
-from airfoil_fit import BSplineProcessor, parse_airfoil_data
-from airfoil_fit.bspline_helper import create_knot_vector, insert_knot
-from airfoil_fit.optimization.fit_metrics import solve_u_for_x_targets, vertical_distance_and_grad
-from airfoil_fit.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
-from airfoil_fit.optimization.continuity_metrics import (
+from airfoil_splines_core import BSplineProcessor, parse_airfoil_data
+from airfoil_splines_core.bspline_helper import create_knot_vector, insert_knot
+from airfoil_splines_core.optimization.fit_metrics import solve_u_for_x_targets, vertical_distance_and_grad
+from airfoil_splines_core.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
+from airfoil_splines_core.optimization.continuity_metrics import (
     start_derivative_weights, curvature_value_and_cp_grad, curvature_derivative_value_and_cp_grad)
 
 

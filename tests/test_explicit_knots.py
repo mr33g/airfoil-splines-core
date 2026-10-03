@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from airfoil_fit import BSplineProcessor
+from airfoil_splines_core import BSplineProcessor
 
 
 class ExplicitKnotTests(unittest.TestCase):

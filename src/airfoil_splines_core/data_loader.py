@@ -3,7 +3,7 @@ from typing import NamedTuple
 import numpy as np
 from scipy.interpolate import CubicSpline
 
-from airfoil_fit import config
+from airfoil_splines_core import config
 
 
 def _remove_consecutive_duplicates(points: np.ndarray, tol: float = 1e-12) -> np.ndarray:

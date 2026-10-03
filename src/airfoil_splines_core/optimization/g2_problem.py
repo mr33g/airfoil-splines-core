@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import numpy as np
-from airfoil_fit import config
-from airfoil_fit.optimization.continuity_metrics import (
+from airfoil_splines_core import config
+from airfoil_splines_core.optimization.continuity_metrics import (
     curvature_derivative_value_and_cp_grad,
     curvature_value_and_cp_grad,
     finite_diff_jacobian,
     start_derivative_weights,
 )
-from airfoil_fit.optimization.control_point_mapping import (
+from airfoil_splines_core.optimization.control_point_mapping import (
     OptimizationLayout,
     build_bounds,
     fourth_difference_smoothing_weights,
 )
-from airfoil_fit.optimization.fit_metrics import vertical_distance_and_grad
-from airfoil_fit.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
+from airfoil_splines_core.optimization.fit_metrics import vertical_distance_and_grad
+from airfoil_splines_core.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
 
 
 def build_g2_problem(

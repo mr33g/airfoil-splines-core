@@ -4,13 +4,13 @@ import logging
 import numpy as np
 from scipy import optimize
 
-from airfoil_fit.optimization import (
+from airfoil_splines_core.optimization import (
     OptimizationLayout,
     build_g2_problem,
     control_points_to_initial_vars,
     vars_to_control_points,
 )
-from airfoil_fit import bspline_helper
+from airfoil_splines_core import bspline_helper
 
 
 def fit_bspline(

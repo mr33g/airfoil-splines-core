@@ -1,11 +1,11 @@
-# AirfoilFit
+# airfoil-splines-core
 
 Headless B-spline fitting for airfoil coordinate data, using NumPy and SciPy.
 The shared solver uses vertical fitting error with G1, G2 or G3 leading-edge
 continuity. Callers specify degrees and control-point counts explicitly for each
 surface; knot insertion always preserves degree. The fitter infers trailing-edge
 geometry from its input surfaces. `apply_te_thickness_to_reference` in
-`airfoil_fit.bspline_helper` adjusts those surfaces to a requested thickness.
+`airfoil_splines_core.bspline_helper` adjusts those surfaces to a requested thickness.
 
 ```sh
 python -m pip install .
@@ -13,7 +13,7 @@ python -m unittest discover -s tests
 ```
 
 ```python
-from airfoil_fit import BSplineProcessor, load_airfoil_data, export_bspline_to_bsp
+from airfoil_splines_core import BSplineProcessor, load_airfoil_data, export_bspline_to_bsp
 
 data = load_airfoil_data("profile.dat")
 fit = BSplineProcessor(degree=7)
@@ -35,4 +35,4 @@ fitted geometry. Failed refinement leaves the previous valid geometry intact.
 `parse_airfoil_data(text)` parses embedded DAT contents without file I/O;
 `AirfoilProcessor.load_text(text)` also prepares reference points and tangents.
 Already prepared coordinate arrays can be passed directly to `fit_bspline`.
-Vertical residual metrics are in `airfoil_fit.optimization.fit_metrics`.
+Vertical residual metrics are in `airfoil_splines_core.optimization.fit_metrics`.

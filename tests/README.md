@@ -8,18 +8,18 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 python -m unittest discover -s tests
 ```
 
-To exercise AirfoilSpline's generated bundle instead:
+To exercise the Fusion add-in's generated bundle instead:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path ..\AirfoilSpline\_vendor).Path
-python -c "import airfoil_fit; print(airfoil_fit.__file__)"
+$env:PYTHONPATH = (Resolve-Path ..\airfoil-splines-for-fusion\_vendor).Path
+python -c "import airfoil_splines_core; print(airfoil_splines_core.__file__)"
 python -m unittest discover -s tests
 ```
 
 With coverage installed in the test environment:
 
 ```powershell
-python -m coverage run --branch --source=airfoil_fit -m unittest discover -s tests
+python -m coverage run --branch --source=airfoil_splines_core -m unittest discover -s tests
 python -m coverage report
 ```
 

@@ -1,8 +1,8 @@
 from pathlib import Path
 import numpy as np
 
-from airfoil_fit import config
-from airfoil_fit.data_loader import parse_airfoil_data
+from airfoil_splines_core import config
+from airfoil_splines_core.data_loader import parse_airfoil_data
 
 
 class AirfoilProcessor:

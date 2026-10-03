@@ -9,7 +9,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from airfoil_fit import BSplineProcessor
+from airfoil_splines_core import BSplineProcessor
 
 class CoreTests(unittest.TestCase):
     def test_no_application_imports(self):
@@ -22,9 +22,9 @@ class CoreTests(unittest.TestCase):
 
     def test_fusion_baseline_continuity_modes(self):
         from scipy.interpolate import BSpline
-        from airfoil_fit.operations import fit_ops
-        from airfoil_fit.optimization import control_points_to_initial_vars
-        from airfoil_fit.optimization.fit_metrics import solve_u_for_x_targets
+        from airfoil_splines_core.operations import fit_ops
+        from airfoil_splines_core.optimization import control_points_to_initial_vars
+        from airfoil_splines_core.optimization.fit_metrics import solve_u_for_x_targets
         expected = json.loads((ROOT / "tests" / "fusion_baseline.json").read_text())
         x = (1 - np.cos(np.linspace(0, np.pi, 61))) / 2
         y = 5 * .12 * (.2969*np.sqrt(x)-.126*x-.3516*x*x+.2843*x**3-.1036*x**4)
@@ -86,7 +86,7 @@ class CoreTests(unittest.TestCase):
             np.testing.assert_allclose(proc.lower_control_points[-1], lower[-1], atol=1e-8)
 
     def test_requested_thickness_adjusts_surfaces_without_mutating_source(self):
-        from airfoil_fit.bspline_helper import apply_te_thickness_to_reference
+        from airfoil_splines_core.bspline_helper import apply_te_thickness_to_reference
         for blunt in (False, True):
             upper, lower = self.surfaces(blunt)
             original_upper, original_lower = upper.copy(), lower.copy()
@@ -104,7 +104,7 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(proc.is_sharp_te, thickness == 0)
 
     def test_fixed_degree_insertion_retains_knots_and_shape_error(self):
-        from airfoil_fit.optimization.fit_metrics import pure_surface_fit_error
+        from airfoil_splines_core.optimization.fit_metrics import pure_surface_fit_error
         upper, lower = self.surfaces()
         proc = BSplineProcessor(degree=3)
         self.assertTrue(proc.fit_bspline(upper, lower, 4, continuity=1, smoothing_weight=.001))
@@ -136,7 +136,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(np.isfinite(proc.upper_curve(np.linspace(0, 1, 50))).all())
 
     def test_loader_and_export_are_headless(self):
-        from airfoil_fit import load_airfoil_data, AirfoilData, export_bspline_to_bsp
+        from airfoil_splines_core import load_airfoil_data, AirfoilData, export_bspline_to_bsp
         upper, lower = self.surfaces(True)
         contour = np.vstack([upper[::-1], lower[1:]])
         with tempfile.TemporaryDirectory() as directory:
@@ -155,7 +155,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(payload['upper']['degree'], 7)
 
     def test_vertical_gradient_matches_finite_difference(self):
-        from airfoil_fit.optimization.fit_metrics import vertical_distance_and_grad
+        from airfoil_splines_core.optimization.fit_metrics import vertical_distance_and_grad
         upper, lower = self.surfaces()
         proc = BSplineProcessor(degree=7)
         self.assertTrue(proc.fit_bspline(upper, lower, 8, continuity=1, smoothing_weight=.001))
@@ -189,7 +189,7 @@ class CoreTests(unittest.TestCase):
         def failed(_objective, x, **kwargs):
             return OptimizeResult(x=x, success=False, status=9, message='Iteration limit', fun=1., nit=1)
         proc = BSplineProcessor(degree=7)
-        with patch('airfoil_fit.operations.g1_ops.optimize.minimize', side_effect=failed):
+        with patch('airfoil_splines_core.operations.g1_ops.optimize.minimize', side_effect=failed):
             result = proc.fit_bspline(upper, lower, 8, continuity=1, smoothing_weight=.001)
         self.assertFalse(result)
         self.assertFalse(proc.is_fitted())
@@ -201,7 +201,7 @@ class CoreTests(unittest.TestCase):
         upper, lower = self.surfaces()
         for continuity in (2, 3):
             proc = BSplineProcessor(degree=7)
-            with patch('airfoil_fit.operations.fit_ops.fit_with_g2_optimization', return_value=False), \
+            with patch('airfoil_splines_core.operations.fit_ops.fit_with_g2_optimization', return_value=False), \
                  patch.object(proc, '_fit_g1_independent') as fallback:
                 result = proc.fit_bspline(upper, lower, 8, continuity=continuity, smoothing_weight=.001)
             self.assertFalse(result)
@@ -221,7 +221,7 @@ class CoreTests(unittest.TestCase):
             result.message = 'Iteration limit'
             return result
         proc = BSplineProcessor(degree=7)
-        with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=limited):
+        with patch('airfoil_splines_core.operations.fit_ops.optimize.minimize', side_effect=limited):
             result = proc.fit_bspline(upper, lower, 8, continuity=2, smoothing_weight=.001)
         self.assertFalse(result)
         self.assertEqual(result.diagnostics['status'], 9)
@@ -242,7 +242,7 @@ class CoreTests(unittest.TestCase):
                     result.success, result.status, result.message = False, 9, 'Iteration limit'
             return result
         proc = BSplineProcessor(degree=7)
-        with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=limited_once):
+        with patch('airfoil_splines_core.operations.fit_ops.optimize.minimize', side_effect=limited_once):
             result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
         self.assertTrue(result, result.message)
         self.assertEqual(len(attempts), 2)
@@ -265,7 +265,7 @@ class CoreTests(unittest.TestCase):
                 result.success, result.status, result.message = False, 9, 'Iteration limit'
             return result
         proc = BSplineProcessor(degree=7)
-        with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=limited):
+        with patch('airfoil_splines_core.operations.fit_ops.optimize.minimize', side_effect=limited):
             result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
         self.assertFalse(result)
         self.assertEqual(len(attempts), 2)
@@ -287,7 +287,7 @@ class CoreTests(unittest.TestCase):
                         result.success, result.status, result.message = False, 9, 'Iteration limit'
                     return result
                 proc = BSplineProcessor(degree=7)
-                with patch('airfoil_fit.operations.fit_ops.optimize.minimize', side_effect=invalid):
+                with patch('airfoil_splines_core.operations.fit_ops.optimize.minimize', side_effect=invalid):
                     result = proc.fit_bspline(upper, lower, 8, continuity=3, smoothing_weight=.001)
                 self.assertFalse(result)
                 self.assertEqual(len(attempts), 1)
@@ -310,7 +310,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(proc.is_fitted())
 
     def test_text_and_file_loading_match_for_both_formats(self):
-        from airfoil_fit import parse_airfoil_data, load_airfoil_data, AirfoilProcessor
+        from airfoil_splines_core import parse_airfoil_data, load_airfoil_data, AirfoilProcessor
         upper, lower = self.surfaces(True)
         for lednicer in (False, True):
             points = np.vstack([upper, lower]) if lednicer else np.vstack([upper[::-1], lower[1:]])

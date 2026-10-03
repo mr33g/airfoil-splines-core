@@ -4,9 +4,9 @@ import numpy as np
 from scipy import interpolate
 import logging
 
-from airfoil_fit import config
-from airfoil_fit.fit_result import FitResult
-from airfoil_fit.operations import (
+from airfoil_splines_core import config
+from airfoil_splines_core.fit_result import FitResult
+from airfoil_splines_core.operations import (
     apply_knot_insertions,
     cp_spacing_violates_minimum,
     finalize_curves,
@@ -21,10 +21,10 @@ from airfoil_fit.operations import (
     refit_after_knot_insertion,
     validate_continuity,
 )
-from airfoil_fit.optimization import (
+from airfoil_splines_core.optimization import (
     vars_to_control_points,
 )
-from airfoil_fit import bspline_helper
+from airfoil_splines_core import bspline_helper
 
 class BSplineProcessor:
     """

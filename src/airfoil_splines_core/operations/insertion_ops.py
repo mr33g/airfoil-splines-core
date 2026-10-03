@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 from copy import deepcopy
 
-from airfoil_fit.optimization import pure_surface_fit_error
-from airfoil_fit import bspline_helper
+from airfoil_splines_core.optimization import pure_surface_fit_error
+from airfoil_splines_core import bspline_helper
 
 
 def apply_knot_insertions(proc, new_knots: list[float], surface: str | None = None) -> bool | None:

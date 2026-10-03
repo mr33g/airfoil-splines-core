@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 from scipy import optimize
 
-from airfoil_fit import config
-from airfoil_fit.optimization.fit_metrics import vertical_distance_and_grad
-from airfoil_fit.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
-from airfoil_fit import bspline_helper
+from airfoil_splines_core import config
+from airfoil_splines_core.optimization.fit_metrics import vertical_distance_and_grad
+from airfoil_splines_core.optimization.te_handle_quality import te_handle_quality_penalty_and_grad
+from airfoil_splines_core import bspline_helper
 
 
 def _pack_control_points(cp: np.ndarray) -> np.ndarray:

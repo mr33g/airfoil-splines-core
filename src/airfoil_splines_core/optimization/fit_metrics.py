@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from scipy import interpolate
 
-from airfoil_fit import bspline_helper
+from airfoil_splines_core import bspline_helper
 
 
 def build_basis_derivative_matrix(
