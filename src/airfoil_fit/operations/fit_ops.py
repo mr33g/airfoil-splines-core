@@ -23,6 +23,7 @@ def fit_bspline(
     smoothing_weight: float,
     upper_te_tangent_vector: np.ndarray | None = None,
     lower_te_tangent_vector: np.ndarray | None = None,
+    knot_vectors: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> bool:
     """Fit B-splines with G1 and optional G2 constraints at leading edge."""
     try:
@@ -57,6 +58,26 @@ def fit_bspline(
         proc.enforce_g2, proc.enforce_g3 = continuity >= 2, continuity == 3
         proc.smoothing_weight = float(smoothing_weight)
 
+        if knot_vectors is not None:
+            if len(knot_vectors) != 2:
+                raise ValueError("Provide one knot vector per surface.")
+            validated = []
+            for knots, count, degree in zip(knot_vectors, (num_cp_upper, num_cp_lower),
+                                            (proc.degree_upper, proc.degree_lower)):
+                knots = np.asarray(knots, dtype=float)
+                if (knots.ndim != 1 or len(knots) != count + degree + 1
+                        or not np.isfinite(knots).all() or np.any(np.diff(knots) < 0)
+                        or not np.all(knots[:degree + 1] == 0)
+                        or not np.all(knots[-degree - 1:] == 1)
+                        or np.any(knots[degree + 1:-degree - 1] <= 0)
+                        or np.any(knots[degree + 1:-degree - 1] >= 1)):
+                    raise ValueError("Invalid clamped unit-domain knot vector for degree/count.")
+                _, multiplicities = np.unique(knots[degree + 1:-degree - 1], return_counts=True)
+                if np.any(multiplicities > degree):
+                    raise ValueError("Interior knot multiplicity must not exceed degree.")
+                validated.append(knots.copy())
+            proc.upper_knot_vector, proc.lower_knot_vector = validated
+
         proc.is_sharp_te = bool(np.linalg.norm(upper_data[-1] - lower_data[-1]) <= 1e-8)
 
         le_point = (upper_data[0] + lower_data[0]) / 2
@@ -86,6 +107,7 @@ def fit_bspline(
                 (proc.num_cp_upper, proc.num_cp_lower),
                 upper_te_dir,
                 lower_te_dir,
+                use_existing_knot_vectors=knot_vectors is not None,
             )
             if not success:
                 return False
@@ -98,6 +120,7 @@ def fit_bspline(
                 upper_te_dir,
                 lower_te_dir,
                 enable_soft_te_handle_quality=True,
+                use_existing_knot_vectors=knot_vectors is not None,
             )
 
         if not success:

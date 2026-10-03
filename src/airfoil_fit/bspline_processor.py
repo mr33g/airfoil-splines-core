@@ -75,13 +75,21 @@ class BSplineProcessor:
         continuity: int, smoothing_weight: float,
         upper_te_tangent_vector: np.ndarray | None = None,
         lower_te_tangent_vector: np.ndarray | None = None,
+        knot_vectors: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> FitResult:
-        """Fit the explicit degrees/counts; never substitute a weaker continuity."""
+        """Fit explicit degrees/counts and optional clamped unit-domain knot vectors.
+
+        Supplying knots preserves their positions during a fresh solve, for example
+        when changing smoothing after refinement. Counts must match the vectors.
+        Failure clears the model; applications can fit a candidate before replacing
+        a previously accepted model. No weaker continuity is substituted.
+        """
         success = fit_bspline_op(
             self, upper_data, lower_data, num_control_points,
             continuity=continuity, smoothing_weight=smoothing_weight,
             upper_te_tangent_vector=upper_te_tangent_vector,
             lower_te_tangent_vector=lower_te_tangent_vector,
+            knot_vectors=knot_vectors,
         )
         if success:
             self.last_error_message = None
