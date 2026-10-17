@@ -35,6 +35,18 @@ class BSPIOTests(unittest.TestCase):
         np.testing.assert_array_equal(loaded.upper_control_points, model.upper_control_points)
         np.testing.assert_array_equal(loaded.lower_knots, model.lower_knot_vector)
 
+    def test_infers_degree_for_historical_export(self):
+        model = self.model()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "historical.bsp"
+            self.assertTrue(export_bspline_to_bsp(model, "Historical", path))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["upper"].pop("degree")
+            payload["lower"].pop("degree")
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            loaded = load_bspline_from_bsp(path)
+        self.assertEqual((loaded.upper_degree, loaded.lower_degree), (3, 3))
+
     def test_rejects_invalid_surfaces(self):
         valid_surface = dict(px=[0, 0, .5, 1], py=[0, .1, .1, 0], knots=[0, 0, 0, 0, 1, 1, 1, 1], degree=3)
         invalid_values = (

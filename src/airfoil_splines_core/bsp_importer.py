@@ -36,8 +36,6 @@ def _parse_surface_json(payload: object, *, surface_name: str) -> tuple[np.ndarr
         raise ValueError(f"Surface '{surface_name}' has mismatched 'px'/'py' lengths.")
     if not px:
         raise ValueError(f"Surface '{surface_name}' must contain at least one control point.")
-    if isinstance(degree, bool) or not isinstance(degree, int):
-        raise ValueError(f"Surface '{surface_name}' degree must be an integer.")
 
     try:
         control_points = np.column_stack((np.asarray(px, dtype=float), np.asarray(py, dtype=float)))
@@ -45,7 +43,13 @@ def _parse_surface_json(payload: object, *, surface_name: str) -> tuple[np.ndarr
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Surface '{surface_name}' contains invalid numeric values.") from exc
 
-    degree_value = int(degree)
+    inferred_degree = len(knot_vector) - len(control_points) - 1
+    if degree is None:
+        degree_value = inferred_degree
+    elif isinstance(degree, bool) or not isinstance(degree, int):
+        raise ValueError(f"Surface '{surface_name}' degree must be an integer.")
+    else:
+        degree_value = int(degree)
     if degree_value < 1:
         raise ValueError(f"Surface '{surface_name}' has invalid degree {degree_value}.")
     if not np.isfinite(control_points).all() or not np.isfinite(knot_vector).all():
