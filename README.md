@@ -240,11 +240,11 @@ For a gap of 0.2 mm on a 200 mm chord, pass
 ## Export and integration
 
 `export_bspline_to_bsp(model, name, path, logger_func=print)` writes a UTF-8 JSON
-file and returns a Boolean. The top-level keys are `name`, `upper`, and `lower`.
+file and returns a Boolean. `load_bspline_from_bsp(path)` validates that format
+and returns a `BSPModelData` instance. The top-level keys are `name`, `upper`, and `lower`.
 Each surface contains `px`, `py`, `knots`, and `degree`; `px` and `py` are the
 control-point coordinate lists. Coordinates remain normalized. This preserves
-the spline representation rather than exporting sampled points. The package
-currently exposes a BSP writer, not a BSP reader.
+the spline representation rather than exporting sampled points.
 
 `data_loader.export_airfoil_to_selig_format(upper, lower, name, path)` writes DAT
 coordinates in Selig contour order. To export fitted geometry, pass sampled curve
