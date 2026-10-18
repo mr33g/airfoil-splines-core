@@ -10,13 +10,17 @@ __all__ = [
     "BSPModelData",
     "BSplineProcessor",
     "FitResult",
+    "FitAttempt",
+    "FitRecovery",
     "export_bspline_to_bsp",
     "load_airfoil_data",
     "load_bspline_from_bsp",
     "parse_airfoil_data",
+    "fit_with_recovery",
 ]
 
 from airfoil_splines_core.airfoil_processor import AirfoilProcessor
 from airfoil_splines_core.bsp_exporter import export_bspline_to_bsp
 
 from .fit_result import FitResult
+from .fit_recovery import FitAttempt, FitRecovery, fit_with_recovery
