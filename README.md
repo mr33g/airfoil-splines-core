@@ -231,8 +231,8 @@ RMS and maximum error are chord-normalized distances; multiply by physical chord
 length to express them in the same physical units.
 
 `bspline_helper.apply_te_thickness_to_reference(upper, lower, thickness)` returns
-copies adjusted to a target normalized trailing-edge gap. It uses a smooth
-chordwise displacement and leaves the leading edge fixed. Validate that the target
+copies adjusted to a target normalized trailing-edge gap. It uses the exponential
+chordwise blend from PlanformCreator2 and leaves the leading edge fixed. Validate that the target
 is finite and nonnegative in the calling application, then fit the adjusted arrays.
 For a gap of 0.2 mm on a 200 mm chord, pass
 `target_te_thickness=0.2 / 200`.

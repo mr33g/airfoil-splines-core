@@ -345,7 +345,7 @@ def apply_te_thickness_to_reference(
     lower_data: np.ndarray,
     target_te_thickness: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return copies of surface data adjusted to the requested trailing-edge thickness."""
+    """Adjust copies of normalized LE-to-TE surfaces to the requested gap."""
     adjusted_upper = upper_data.copy()
     adjusted_lower = lower_data.copy()
 
@@ -357,12 +357,12 @@ def apply_te_thickness_to_reference(
     if abs(te_delta) <= 1e-9:
         return adjusted_upper, adjusted_lower
 
+    blend_range = 0.8
+    decay = 1.0 / blend_range - 1.0
     half_delta = 0.5 * te_delta
-    upper_x = np.clip(adjusted_upper[:, 0], 0.0, 1.0)
-    lower_x = np.clip(adjusted_lower[:, 0], 0.0, 1.0)
-
-    adjusted_upper[:, 1] += half_delta * smoothstep_quintic(upper_x)
-    adjusted_lower[:, 1] -= half_delta * smoothstep_quintic(lower_x)
+    for surface, offset in ((adjusted_upper, half_delta), (adjusted_lower, -half_delta)):
+        x = np.clip(surface[:, 0], 0.0, 1.0)
+        surface[:, 1] += offset * x * np.exp(-decay * (1.0 - x))
     return adjusted_upper, adjusted_lower
 
 

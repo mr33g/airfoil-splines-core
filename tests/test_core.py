@@ -103,6 +103,21 @@ class CoreTests(unittest.TestCase):
                 self.assertAlmostEqual(gap, thickness, places=8)
                 self.assertEqual(proc.is_sharp_te, thickness == 0)
 
+    def test_short_chord_te_thickening_uses_planformcreator_blend(self):
+        from airfoil_splines_core.bspline_helper import apply_te_thickness_to_reference
+
+        upper, lower = self.surfaces(blunt=True)
+        target = 0.4 / 5.0  # A 0.4 mm gap on a 5 mm tip chord.
+        adjusted_upper, adjusted_lower = apply_te_thickness_to_reference(upper, lower, target)
+        gap = adjusted_upper[:, 1] - adjusted_lower[:, 1]
+        original_gap = upper[:, 1] - lower[:, 1]
+        midpoint = len(gap) // 2
+        self.assertAlmostEqual(gap[midpoint] - original_gap[midpoint],
+                               (target - original_gap[-1]) * 0.5 * np.exp(-0.125))
+        self.assertAlmostEqual(gap[-1], target)
+        np.testing.assert_array_equal(adjusted_upper[:, 0], upper[:, 0])
+        np.testing.assert_array_equal(adjusted_lower[:, 0], lower[:, 0])
+
     def test_fixed_degree_insertion_retains_knots_and_shape_error(self):
         from airfoil_splines_core.optimization.fit_metrics import pure_surface_fit_error
         upper, lower = self.surfaces()
